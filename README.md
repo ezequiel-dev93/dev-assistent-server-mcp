@@ -17,42 +17,52 @@ Proporciona a cualquier asistente de código (Antigravity, Open Code, Claude Des
 
 El servidor sigue estrictamente los principios de **Inversión de Dependencias (SOLID)**:
 
+<p align="center">
+  <img src="docs/architecture.svg" alt="Arquitectura Hexagonal del Servidor MCP" width="100%" />
+</p>
+
+<details>
+<summary>📐 Ver código fuente Mermaid</summary>
+
 ```mermaid
 flowchart TD
-    subgraph Clients["Clientes MCP (LLM: Gemini / Claude)"]
-        A["Antigravity"]
-        B["Open Code"]
-        C["Claude Desktop / Cursor"]
+    classDef clientStyle fill:#0f172a,stroke:#06b6d4,stroke-width:2px,color:#fff;
+    classDef transportStyle fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#fff;
+    classDef coreStyle fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#fff;
+    classDef infraStyle fill:#172554,stroke:#3b82f6,stroke-width:2px,color:#fff;
+
+    subgraph LLMClients["🤖 Clientes LLM (Agentes de Código)"]
+        A["Antigravity (Gemini)"]:::clientStyle
+        B["Cursor"]:::clientStyle
+        C["Claude Desktop"]:::clientStyle
+        D["Open Code"]:::clientStyle
     end
 
-    subgraph MCPInterface["Capa de Transporte (JSON-RPC)"]
-        FastMCP["FastMCP Server (Stdio)"]
+    subgraph TransportLayer["⚡ Capa de Transporte & Servidor MCP (JSON-RPC)"]
+        FastMCP["MCPServer / FastMCP (Dual 1.x & 2.x)"]:::transportStyle
+        Tools["Tools: ProjectTools & MemoryTools"]:::transportStyle
     end
 
-    subgraph Tools["Capa de Aplicación / Herramientas"]
-        PT["ProjectTools"]
-        MT["MemoryTools"]
+    subgraph HexagonalCore["🏛️ Core de Dominio & Puertos (Contratos SOLID)"]
+        Models["Modelos (Pydantic v2)"]:::coreStyle
+        IPS["Port: IProjectScanner"]:::coreStyle
+        IMR["Port: IMemoryRepository"]:::coreStyle
     end
 
-    subgraph Core["Dominio & Puertos (Interfaces)"]
-        Models["Modelos (Pydantic v2)"]
-        IPScanner["IProjectScanner (Port)"]
-        IMemory["IMemoryRepository (Port)"]
+    subgraph Infrastructure["🔧 Adaptadores de Infraestructura"]
+        FSScanner["FileSystemProjectScanner<br/>(FastAPI, Astro, React, Hexagonal, Screaming)"]:::infraStyle
+        SQLite["SqliteMemoryRepository<br/>(Persistencia Local SQLite)"]:::infraStyle
     end
 
-    subgraph Infrastructure["Adaptadores de Infraestructura"]
-        FSScanner["FileSystemProjectScanner"]
-        SQLiteRepo["SqliteMemoryRepository (SQLite local)"]
-    end
-
-    Clients <-->|JSON-RPC Stdio| FastMCP
-    FastMCP --> PT
-    FastMCP --> MT
-    PT --> IPScanner
-    MT --> IMemory
-    IPScanner -.->|Implementa| FSScanner
-    IMemory -.->|Implementa| SQLiteRepo
+    LLMClients <-->|JSON-RPC stdio| FastMCP
+    FastMCP --> Tools
+    Tools --> IPS
+    Tools --> IMR
+    IPS -.->|Implementa| FSScanner
+    IMR -.->|Implementa| SQLite
 ```
+
+</details>
 
 ---
 
