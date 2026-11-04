@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Protocol](https://img.shields.io/badge/MCP-1.2.0%2B-purple.svg)](https://modelcontextprotocol.io/)
-[![Skill](https://img.shields.io/badge/Agent%20Skill-SKILL.md%20Ready-06b6d4.svg)](SKILL.md)
+[![Skill](https://img.shields.io/badge/Agent%20Skill-Available%20on%20Agensi-blue.svg)](https://www.agensi.io/r/EZEQUIELSUAREZ)
 [![Architecture](https://img.shields.io/badge/Architecture-Hexagonal-green.svg)](#-arquitectura-del-servidor)
 [![Storage](https://img.shields.io/badge/Storage-SQLite%20Local-orange.svg)](#-memoria-persistente-soberana)
 [![License](https://img.shields.io/badge/License-Proprietary%20%7C%20All%20Rights%20Reserved-critical.svg)](LICENSE)
