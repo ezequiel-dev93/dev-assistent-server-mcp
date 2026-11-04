@@ -36,6 +36,53 @@ class TestSqliteMemoryRepository(unittest.TestCase):
         self.assertIn("pesos COP", search_res)
         self.assertIn("client_context", search_res)
 
+    def test_multi_term_search_and_upsert_deduplication(self):
+        # Guardar dos veces el mismo contenido con diferentes tags -> debe hacer Upsert (mismo ID)
+        first = self.repo.save_memory(
+            MemoryEntry(
+                category=MemoryCategory.ARCHITECTURE,
+                content="Usar FastAPI con Pydantic v2 y autenticación JWT en adaptadores",
+                project_name="api_core",
+                tags=["fastapi", "pydantic"],
+            )
+        )
+        second = self.repo.save_memory(
+            MemoryEntry(
+                category=MemoryCategory.ARCHITECTURE,
+                content="Usar FastAPI con Pydantic v2 y autenticación JWT en adaptadores",
+                project_name="api_core",
+                tags=["jwt", "security"],
+            )
+        )
+        self.assertEqual(first.id, second.id)
+        self.assertIn("fastapi", second.tags)
+        self.assertIn("jwt", second.tags)
+
+        # Búsqueda multi-término con palabras separadas ("fastapi jwt")
+        results = self.repo.search_memories(query="fastapi jwt", project_name="api_core")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].id, first.id)
+
+    def test_export_adr_markdown(self):
+        self.tools.remember(
+            content="El dominio no puede importar SQLAlchemy directamente",
+            category="architecture",
+            project_name="demo_app",
+            tags="hexagonal,domain",
+        )
+        self.tools.remember(
+            content="Se eligió PostgreSQL 16 con pgvector para búsqueda híbrida",
+            category="decision",
+            project_name="demo_app",
+            tags="postgres,rag",
+        )
+        adr_path = os.path.join(self.temp_dir.name, "docs", "ADR.md")
+        adr_output = self.tools.export_adr(project_name="demo_app", output_path=adr_path)
+        self.assertTrue(os.path.isfile(adr_path))
+        self.assertIn("Architecture Decision Records (ADR)", adr_output)
+        self.assertIn("SQLAlchemy", adr_output)
+        self.assertIn("pgvector", adr_output)
+
     def test_delete_memory(self):
         entry = self.repo.save_memory(
             MemoryEntry(
@@ -83,6 +130,31 @@ class TestProjectScannerAndBlueprints(unittest.TestCase):
         self.assertIn("components/", blueprint)
         self.assertIn("services/", blueprint)
         self.assertIn("types/", blueprint)
+
+    def test_audit_architecture_detects_violations_and_compliance(self):
+        proj_dir = os.path.join(self.temp_dir.name, "hex_project")
+        domain_dir = os.path.join(proj_dir, "src", "core", "domain")
+        infra_dir = os.path.join(proj_dir, "src", "infrastructure")
+        os.makedirs(domain_dir, exist_ok=True)
+        os.makedirs(infra_dir, exist_ok=True)
+
+        # 1. Crear archivo limpio en domain
+        clean_file = os.path.join(domain_dir, "order.py")
+        with open(clean_file, "w", encoding="utf-8") as f:
+            f.write("from dataclasses import dataclass\n\n@dataclass\nclass Order:\n    id: int\n")
+
+        clean_report = self.tools.audit_project_architecture("hex_project")
+        self.assertIn("100% COMPLIANT", clean_report)
+
+        # 2. Introducir una violación en domain (importar fastapi y sqlite3)
+        bad_file = os.path.join(domain_dir, "bad_service.py")
+        with open(bad_file, "w", encoding="utf-8") as f:
+            f.write("import sqlite3\nfrom fastapi import HTTPException\n")
+
+        violation_report = self.tools.audit_project_architecture("hex_project")
+        self.assertIn("VIOLACIONES DETECTADAS", violation_report)
+        self.assertIn("bad_service.py", violation_report)
+        self.assertIn("Hexagonal Architecture Violation", violation_report)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,31 @@
+PROPRIETARY SOFTWARE LICENSE — ALL RIGHTS RESERVED
+
+Copyright (c) 2026 Ezequiel Suárez (https://www.ezequielsuarez-dev.com/)
+All Rights Reserved / Todos los derechos reservados.
+
+1. PROPIEDAD INTELECTUAL
+Este software, incluyendo su código fuente, arquitectura hexagonal, motor de inspección de
+arquitecturas, persistencia de memoria soberana en SQLite, adaptadores MCP, paquete SKILL.md
+y documentación técnica (en adelante, el "Software"), es propiedad exclusiva y confidencial
+de Ezequiel Suárez.
+
+2. RESTRICCIONES DE USO Y CLONACIÓN
+Queda estrictamente prohibido para cualquier persona física o jurídica sin autorización escrita
+previa del titular (o licencia oficial adquirida en canales autorizados):
+  a) Clonar, copiar, bifurcar (fork), reproducir o almacenar copias totales o parciales del Software.
+  b) Modificar, descompilar, realizar ingeniería inversa o crear obras derivadas basadas en el Software.
+  c) Distribuir, sublicenciar, alquilar, vender o explotar comercialmente el Software o su arquitectura.
+  d) Utilizar el Software para entrenar modelos de Inteligencia Artificial de terceros.
+
+3. ACCESO AUTORIZADO
+El acceso de lectura a este repositorio (en caso de ser otorgado con fines de auditoría técnica
+o evaluación profesional) no concede ninguna licencia, derecho de propiedad ni permiso de uso
+o reproducción sobre el código.
+
+4. AUSENCIA DE GARANTÍAS
+El Software se proporciona "TAL CUAL" ("AS IS"), sin garantías de ningún tipo, expresas o implícitas.
+
+Contacto Legal y Comercial:
+Ezequiel Suárez
+Portfolio: https://www.ezequielsuarez-dev.com/
+Email: ezequielsuarez.dev@gmail.com

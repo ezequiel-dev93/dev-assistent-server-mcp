@@ -37,7 +37,7 @@ try:
 
     mcp = MCPServer(
         name="DevAssistant-MCP",
-        description="Servidor MCP para inspección de arquitecturas y memoria persistente para el agente.",
+        description="Servidor MCP para inspección de arquitecturas, auditoría hexagonal y memoria persistente para el agente.",
     )
 except (ImportError, ModuleNotFoundError):
     try:
@@ -45,7 +45,7 @@ except (ImportError, ModuleNotFoundError):
 
         mcp = FastMCP(
             name="DevAssistant-MCP",
-            description="Servidor MCP para inspección de arquitecturas y memoria persistente para el agente.",
+            description="Servidor MCP para inspección de arquitecturas, auditoría hexagonal y memoria persistente para el agente.",
         )
     except (ImportError, ModuleNotFoundError):
         pass
@@ -61,6 +61,11 @@ if mcp is not None:
     def inspect_project(project_name_or_path: str) -> str:
         """Inspecciona en profundidad un proyecto (FastAPI, Astro, Next.js), identificando patrones (Hexagonal, Screaming) y reglas de código."""
         return project_tools.inspect_project(project_name_or_path)
+
+    @mcp.tool()
+    def audit_architecture(project_name_or_path: str) -> str:
+        """Audita los archivos de código de un proyecto en busca de violaciones a la Arquitectura Hexagonal (imports prohibidos en core/domain) o Screaming Architecture."""
+        return project_tools.audit_project_architecture(project_name_or_path)
 
     @mcp.tool()
     def get_feature_blueprint(project_name: str, feature_name: str) -> str:
@@ -82,7 +87,7 @@ if mcp is not None:
     def remember_fact(
         content: str, category: str = "general", project_name: str = "", tags: str = ""
     ) -> str:
-        """Guarda un hecho, preferencia, regla de arquitectura o contexto de cliente en la memoria persistente del agente."""
+        """Guarda o actualiza (Upsert) un hecho, preferencia, regla de arquitectura o contexto de cliente en la memoria persistente del agente."""
         return memory_tools.remember(
             content=content,
             category=category,
@@ -94,7 +99,7 @@ if mcp is not None:
     def recall_memory(
         query: str = "", category: str = "", project_name: str = ""
     ) -> str:
-        """Recupera recuerdos de la memoria permanente por búsqueda de texto, categoría (preference, decision, architecture, client_context) o proyecto."""
+        """Recupera recuerdos de la memoria permanente por búsqueda multi-término, categoría (preference, decision, architecture, client_context) o proyecto."""
         return memory_tools.recall(
             query=query, category=category or None, project_name=project_name or None
         )
@@ -108,6 +113,13 @@ if mcp is not None:
     def forget_memory(memory_id: int) -> str:
         """Elimina permanentemente un recuerdo usando su ID numérico."""
         return memory_tools.forget(memory_id=memory_id)
+
+    @mcp.tool()
+    def export_project_adr(project_name: str = "", output_path: str = "") -> str:
+        """Consolida y exporta todas las decisiones y reglas arquitectónicas de la memoria en un documento Markdown de Architecture Decision Records (ADR)."""
+        return memory_tools.export_adr(
+            project_name=project_name or None, output_path=output_path or None
+        )
 
     def run_server():
         mcp.run(transport="stdio")

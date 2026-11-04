@@ -50,6 +50,25 @@ class ProjectDetail(ProjectSummary):
     )
 
 
+class ArchitectureViolation(BaseModel):
+    file_path: str = Field(description="Ruta relativa del archivo donde se detectó la violación")
+    line_number: int = Field(description="Número de línea del import o dependencia prohibida")
+    offending_statement: str = Field(description="Sentencia de importación que viola la regla")
+    rule_broken: str = Field(description="Explicación de la regla arquitectónica vulnerada")
+    severity: str = Field(default="ERROR", description="Nivel de severidad (ERROR, WARNING)")
+
+
+class ArchitectureAuditReport(BaseModel):
+    project_name: str = Field(description="Nombre del proyecto auditado")
+    project_path: str = Field(description="Ruta absoluta del proyecto")
+    detected_architectures: List[ArchitecturePattern] = Field(default_factory=list)
+    files_scanned: int = Field(default=0, description="Cantidad de archivos de código analizados")
+    is_compliant: bool = Field(default=True, description="True si no existen violaciones")
+    violations: List[ArchitectureViolation] = Field(
+        default_factory=list, description="Lista de violaciones detectadas"
+    )
+
+
 class MemoryCategory(str, Enum):
     PREFERENCE = "preference"  # Preferencias de código, librerías, tipado
     DECISION = "decision"  # Decisiones de negocio o arquitectura tomadas

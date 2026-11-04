@@ -1,8 +1,11 @@
 import json
 import os
+import re
 from typing import List, Optional, Set, Tuple
 from src.core.models import (
+    ArchitectureAuditReport,
     ArchitecturePattern,
+    ArchitectureViolation,
     ProjectDetail,
     ProjectStack,
     ProjectSummary,
@@ -23,6 +26,34 @@ IGNORED_DIRS = {
     ".next",
     ".turbo",
     "data",
+}
+
+FORBIDDEN_IN_DOMAIN_OR_CORE = {
+    "infrastructure",
+    "adapters",
+    "fastapi",
+    "streamlit",
+    "flask",
+    "django",
+    "sqlalchemy",
+    "sqlite3",
+    "psycopg2",
+    "asyncpg",
+    "boto3",
+    "requests",
+    "httpx",
+    "redis",
+    "celery",
+}
+
+FORBIDDEN_IN_UI_COMPONENTS = {
+    "sqlite3",
+    "sqlalchemy",
+    "psycopg2",
+    "pg",
+    "prisma",
+    "@prisma/client",
+    "mongoose",
 }
 
 
@@ -82,6 +113,124 @@ class FileSystemProjectScanner(IProjectScanner):
             architecture_guidelines=guidelines,
             summary_description=summary_desc,
         )
+
+    def audit_architecture(self, project_path: str) -> ArchitectureAuditReport:
+        abs_path = os.path.abspath(project_path)
+        name = os.path.basename(abs_path)
+        architectures, _ = self._detect_architecture(abs_path)
+
+        violations: List[ArchitectureViolation] = []
+        files_scanned = 0
+        code_extensions = {".py", ".ts", ".tsx", ".js", ".jsx", ".astro"}
+
+        for root, dirs, files in os.walk(abs_path):
+            dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
+            rel_root = os.path.relpath(root, abs_path).replace("\\", "/")
+            path_parts = [p.lower() for p in rel_root.split("/") if p and p != "."]
+
+            in_core_or_domain = any(p in ("core", "domain", "ports", "entities") for p in path_parts)
+            in_ui_components = "components" in path_parts
+
+            for fname in files:
+                _, ext = os.path.splitext(fname)
+                if ext.lower() not in code_extensions:
+                    continue
+
+                files_scanned += 1
+                if not (in_core_or_domain or in_ui_components):
+                    continue
+
+                full_file_path = os.path.join(root, fname)
+                rel_file_path = os.path.relpath(full_file_path, abs_path).replace("\\", "/")
+
+                try:
+                    with open(full_file_path, "r", encoding="utf-8", errors="ignore") as f:
+                        for line_idx, raw_line in enumerate(f, start=1):
+                            line = raw_line.strip()
+                            if not line or line.startswith("#") or line.startswith("//"):
+                                continue
+
+                            imported_targets = self._extract_imported_modules(line)
+                            if not imported_targets:
+                                continue
+
+                            if in_core_or_domain:
+                                for target in imported_targets:
+                                    root_pkg = target.split(".")[0].split("/")[0].lower()
+                                    if (
+                                        root_pkg in FORBIDDEN_IN_DOMAIN_OR_CORE
+                                        or "infrastructure" in target.lower()
+                                        or "adapters" in target.lower()
+                                    ):
+                                        violations.append(
+                                            ArchitectureViolation(
+                                                file_path=rel_file_path,
+                                                line_number=line_idx,
+                                                offending_statement=line,
+                                                rule_broken=(
+                                                    f"Hexagonal Architecture Violation: Core/Domain layer cannot depend on "
+                                                    f"external framework or infrastructure module '{target}'. Inject via Ports instead."
+                                                ),
+                                                severity="ERROR",
+                                            )
+                                        )
+                                        break
+
+                            if in_ui_components:
+                                for target in imported_targets:
+                                    target_low = target.lower()
+                                    if any(
+                                        forbidden in target_low
+                                        for forbidden in FORBIDDEN_IN_UI_COMPONENTS
+                                    ):
+                                        violations.append(
+                                            ArchitectureViolation(
+                                                file_path=rel_file_path,
+                                                line_number=line_idx,
+                                                offending_statement=line,
+                                                rule_broken=(
+                                                    f"Screaming/Clean UI Violation: UI Component directly imports persistence/DB "
+                                                    f"client '{target}'. Delegate data access to a Service or Use Case."
+                                                ),
+                                                severity="ERROR",
+                                            )
+                                        )
+                                        break
+                except Exception:
+                    pass
+
+        return ArchitectureAuditReport(
+            project_name=name,
+            project_path=abs_path,
+            detected_architectures=architectures,
+            files_scanned=files_scanned,
+            is_compliant=len(violations) == 0,
+            violations=violations,
+        )
+
+    def _extract_imported_modules(self, line: str) -> List[str]:
+        targets: List[str] = []
+        # Python: from X import Y  |  import X
+        py_from = re.match(r"^from\s+([a-zA-Z0-9_\.]+)\s+import\s+", line)
+        if py_from:
+            targets.append(py_from.group(1))
+            return targets
+
+        py_import = re.match(r"^import\s+([a-zA-Z0-9_\.,\s]+)", line)
+        if py_import:
+            raw_mods = py_import.group(1).split(",")
+            for m in raw_mods:
+                clean_m = m.strip().split(" ")[0]
+                if clean_m:
+                    targets.append(clean_m)
+            return targets
+
+        # TypeScript / JS: import ... from 'X' or "X"
+        ts_from = re.search(r"(?:import|from)\s+['\"]([^'\"]+)['\"]", line)
+        if ts_from:
+            targets.append(ts_from.group(1))
+
+        return targets
 
     def _is_project_dir(self, dir_path: str) -> bool:
         project_indicators = [

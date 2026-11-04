@@ -1,3 +1,5 @@
+import os
+from datetime import datetime, timezone
 from typing import Optional
 from src.core.models import MemoryCategory, MemoryEntry
 from src.core.ports import IMemoryRepository
@@ -97,3 +99,72 @@ class MemoryTools:
         if success:
             return f"🗑️ Recuerdo con ID {memory_id} eliminado exitosamente."
         return f"⚠️ No se encontró ningún recuerdo con ID {memory_id} para eliminar."
+
+    def export_adr(
+        self,
+        project_name: Optional[str] = None,
+        output_path: Optional[str] = None,
+    ) -> str:
+        """Genera un documento Markdown de Architecture Decision Records (ADR) a partir de la memoria persistente."""
+        clean_proj = project_name.strip() if project_name and project_name.strip() else None
+        memories = self.repository.list_memories(project_name=clean_proj, limit=200)
+
+        if not memories:
+            scope = f" para el proyecto `{clean_proj}`" if clean_proj else ""
+            return f"No existen registros en memoria{scope} para generar un ADR."
+
+        title_scope = f" — Proyecto `{clean_proj}`" if clean_proj else " — Global Workspace"
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        sections = {
+            MemoryCategory.ARCHITECTURE: "🏛️ 1. Reglas y Límites de Arquitectura (`architecture`)",
+            MemoryCategory.DECISION: "⚖️ 2. Decisiones Técnicas y Trade-offs (`decision`)",
+            MemoryCategory.PREFERENCE: "⚙️ 3. Estándares de Código y Preferencias (`preference`)",
+            MemoryCategory.CLIENT_CONTEXT: "🤝 4. Contexto de Dominio y Reglas de Negocio (`client_context`)",
+            MemoryCategory.GENERAL: "📌 5. Notas Generales (`general`)",
+        }
+
+        md_lines = [
+            f"# 📄 Architecture Decision Records (ADR){title_scope}",
+            "",
+            f"> **Generado automáticamente por:** `DevAssistant MCP Server`  ",
+            f"> **Fecha de consolidación:** `{today_str}`  ",
+            f"> **Total de registros documentados:** `{len(memories)}`",
+            "",
+            "---",
+            "",
+        ]
+
+        for cat_enum, header in sections.items():
+            cat_items = [m for m in memories if m.category == cat_enum]
+            if not cat_items:
+                continue
+
+            md_lines.append(f"## {header}")
+            md_lines.append("")
+            for item in reversed(cat_items):
+                date_badge = (
+                    item.created_at.strftime("%Y-%m-%d") if item.created_at else today_str
+                )
+                proj_badge = f" **[`{item.project_name}`]**" if item.project_name and not clean_proj else ""
+                tags_badge = (
+                    f" — *Tags: `{', '.join(item.tags)}`*" if item.tags else ""
+                )
+                md_lines.append(
+                    f"- **[ADR-{item.id:03d}]** ({date_badge}){proj_badge}: {item.content}{tags_badge}"
+                )
+            md_lines.append("")
+
+        markdown_content = "\n".join(md_lines).strip() + "\n"
+
+        if output_path and output_path.strip():
+            abs_out = os.path.abspath(output_path.strip())
+            os.makedirs(os.path.dirname(abs_out), exist_ok=True)
+            with open(abs_out, "w", encoding="utf-8") as f:
+                f.write(markdown_content)
+            return (
+                f"✅ Documento ADR exportado exitosamente en `{abs_out}`\n\n"
+                f"{markdown_content}"
+            )
+
+        return markdown_content

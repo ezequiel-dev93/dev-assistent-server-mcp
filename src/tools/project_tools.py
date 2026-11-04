@@ -4,11 +4,20 @@ from src.core.ports import IProjectScanner
 
 
 class ProjectTools:
-    """Herramientas de inspección de proyectos para exponer mediante el protocolo MCP."""
+    """Herramientas de inspección y auditoría de proyectos para exponer mediante el protocolo MCP."""
 
     def __init__(self, scanner: IProjectScanner, default_workspace: str = "../"):
         self.scanner = scanner
         self.default_workspace = default_workspace
+
+    def _resolve_target_path(self, project_path_or_name: str) -> Optional[str]:
+        target = project_path_or_name
+        if os.path.exists(target):
+            return os.path.abspath(target)
+        candidate = os.path.join(self.default_workspace, project_path_or_name)
+        if os.path.exists(candidate):
+            return os.path.abspath(candidate)
+        return None
 
     def list_projects(self, workspace_path: Optional[str] = None) -> str:
         """Escanea y lista todos los proyectos detectados en el espacio de trabajo."""
@@ -39,14 +48,9 @@ class ProjectTools:
 
     def inspect_project(self, project_path_or_name: str) -> str:
         """Inspecciona en profundidad un proyecto específico, detallando sus patrones arquitectónicos y estructura."""
-        target = project_path_or_name
-        # Si es un nombre simple, buscarlo dentro de default_workspace
-        if not os.path.exists(target):
-            candidate = os.path.join(self.default_workspace, project_path_or_name)
-            if os.path.exists(candidate):
-                target = candidate
-            else:
-                return f"Error: No se encontró el proyecto o directorio '{project_path_or_name}'."
+        target = self._resolve_target_path(project_path_or_name)
+        if not target:
+            return f"Error: No se encontró el proyecto o directorio '{project_path_or_name}'."
 
         detail = self.scanner.inspect_project(target)
         lines = [
@@ -81,17 +85,52 @@ class ProjectTools:
 
         return "\n".join(lines)
 
+    def audit_project_architecture(self, project_path_or_name: str) -> str:
+        """Audita un proyecto en busca de violaciones a la Arquitectura Hexagonal o Screaming Architecture."""
+        target = self._resolve_target_path(project_path_or_name)
+        if not target:
+            return f"Error: No se encontró el proyecto o directorio '{project_path_or_name}'."
+
+        report = self.scanner.audit_architecture(target)
+        arch_str = ", ".join(a.value for a in report.detected_architectures)
+        status_badge = (
+            "✅ 100% COMPLIANT (Sin violaciones detectadas)"
+            if report.is_compliant
+            else f"❌ {len(report.violations)} VIOLACIONES DETECTADAS"
+        )
+
+        lines = [
+            f"# 🛡️ Auditoría de Límites Arquitectónicos: `{report.project_name}`",
+            "",
+            f"- **Estado:** {status_badge}",
+            f"- **Patrones Auditados:** `{arch_str}`",
+            f"- **Archivos Escaneados:** {report.files_scanned}",
+            "",
+        ]
+
+        if report.is_compliant:
+            lines.append(
+                "🎉 **Excelente:** Ningún archivo de `core/domain/ports` ni componentes UI "
+                "importa dependencias prohibidas de infraestructura o base de datos."
+            )
+        else:
+            lines.append("## 🚨 Detalle de Violaciones Encontradas:")
+            for idx, v in enumerate(report.violations, start=1):
+                lines.append(
+                    f"{idx}. **`{v.file_path}` (Línea {v.line_number})** — `[{v.severity}]`\n"
+                    f"   - **Sentencia:** `{v.offending_statement}`\n"
+                    f"   - **Regla vulnerada:** {v.rule_broken}"
+                )
+
+        return "\n".join(lines)
+
     def scaffold_feature_blueprint(
         self, project_path_or_name: str, feature_name: str
     ) -> str:
         """Genera el plano (blueprint) exacto de archivos y carpetas para crear una nueva feature siguiendo las reglas del proyecto."""
-        target = project_path_or_name
-        if not os.path.exists(target):
-            candidate = os.path.join(self.default_workspace, project_path_or_name)
-            if os.path.exists(candidate):
-                target = candidate
-            else:
-                return f"Error: No se encontró el proyecto '{project_path_or_name}'."
+        target = self._resolve_target_path(project_path_or_name)
+        if not target:
+            return f"Error: No se encontró el proyecto '{project_path_or_name}'."
 
         detail = self.scanner.inspect_project(target)
         slug = feature_name.lower().replace(" ", "_").replace("-", "_")

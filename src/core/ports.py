@@ -1,6 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from src.core.models import MemoryCategory, MemoryEntry, ProjectDetail, ProjectSummary
+from src.core.models import (
+    ArchitectureAuditReport,
+    MemoryCategory,
+    MemoryEntry,
+    ProjectDetail,
+    ProjectSummary,
+)
 
 
 class IProjectScanner(ABC):
@@ -14,6 +20,11 @@ class IProjectScanner(ABC):
     @abstractmethod
     def inspect_project(self, project_path: str) -> ProjectDetail:
         """Analiza en profundidad un proyecto específico y extrae sus patrones."""
+        pass
+
+    @abstractmethod
+    def audit_architecture(self, project_path: str) -> ArchitectureAuditReport:
+        """Audita los archivos de código de un proyecto para detectar violaciones de arquitectura."""
         pass
 
 
