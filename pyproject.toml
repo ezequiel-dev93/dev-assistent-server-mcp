@@ -4,27 +4,76 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dev-assistant-mcp"
-version = "1.2.0"
-description = "Hexagonal Architecture Guardian, Linter & Sovereign Persistent SQLite Memory MCP Server for AI Coding Agents."
+version = "2.0.0"
+description = "Hexagonal Architecture Guardian, AST Linter, MADR Drift Detector & Sovereign FTS5 SQLite Memory MCP Server for AI Coding Agents."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
     { name = "Ezequiel Suárez", email = "ezequielsuarez.dev@gmail.com" }
 ]
-keywords = ["mcp", "ai-agents", "hexagonal-architecture", "screaming-architecture", "memory", "sqlite", "skill"]
+keywords = [
+    "mcp",
+    "ai-agents",
+    "hexagonal-architecture",
+    "screaming-architecture",
+    "adr",
+    "sarif",
+    "memory",
+    "sqlite",
+    "skill",
+]
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp>=1.10.0",
     "pydantic>=2.6.0",
+    "tomli>=2.0.1; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
 ]
 
 [project.urls]
 Homepage = "https://www.ezequielsuarez-dev.com/"
-Repository = "https://github.com/ezequiel-dev93"
+Marketplace = "https://www.agensi.io/r/EZEQUIELSUAREZ"
+Repository = "https://github.com/ezequiel-dev93/dev-assistent-server-mcp"
 
 [project.scripts]
-dev-assistant-mcp = "src.server:run_server"
+dev-assistant-mcp = "dev_assistant_mcp.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["src*"]
+[tool.setuptools]
+package-dir = { "dev_assistant_mcp" = "src" }
+packages = [
+    "dev_assistant_mcp",
+    "dev_assistant_mcp.core",
+    "dev_assistant_mcp.core.services",
+    "dev_assistant_mcp.infrastructure",
+    "dev_assistant_mcp.infrastructure.adr",
+    "dev_assistant_mcp.infrastructure.config",
+    "dev_assistant_mcp.infrastructure.extractors",
+    "dev_assistant_mcp.infrastructure.reporting",
+    "dev_assistant_mcp.infrastructure.resolvers",
+    "dev_assistant_mcp.infrastructure.scanner",
+    "dev_assistant_mcp.infrastructure.storage",
+    "dev_assistant_mcp.tools",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true

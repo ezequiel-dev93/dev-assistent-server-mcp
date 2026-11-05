@@ -1,10 +1,15 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import List, Optional
-from src.core.models import (
+from .models import (
+    AdrEntry,
     ArchitectureAuditReport,
+    ImportRef,
     MemoryCategory,
     MemoryEntry,
+    MemoryScope,
     ProjectDetail,
+    ProjectRules,
     ProjectSummary,
 )
 
@@ -14,17 +19,51 @@ class IProjectScanner(ABC):
 
     @abstractmethod
     def scan_workspace(self, root_dir: str) -> List[ProjectSummary]:
-        """Escanea un directorio raíz en busca de proyectos y retorna sus resúmenes."""
         pass
 
     @abstractmethod
     def inspect_project(self, project_path: str) -> ProjectDetail:
-        """Analiza en profundidad un proyecto específico y extrae sus patrones."""
         pass
 
     @abstractmethod
     def audit_architecture(self, project_path: str) -> ArchitectureAuditReport:
-        """Audita los archivos de código de un proyecto para detectar violaciones de arquitectura."""
+        pass
+
+
+class IImportExtractor(ABC):
+    """Puerto para extraer importaciones desde archivos de código fuente."""
+
+    @abstractmethod
+    def supports(self, file_path: Path) -> bool:
+        pass
+
+    @abstractmethod
+    def extract(self, file_path: Path, project_root: Path) -> List[ImportRef]:
+        pass
+
+
+class IModuleResolver(ABC):
+    """Puerto para clasificar un módulo importado como archivo interno, stdlib o paquete externo."""
+
+    @abstractmethod
+    def resolve_internal(
+        self,
+        imported_module: str,
+        source_file: Path,
+        project_root: Path,
+    ) -> Optional[Path]:
+        pass
+
+    @abstractmethod
+    def is_stdlib(self, imported_module: str, source_file: Path) -> bool:
+        pass
+
+
+class IProjectConfigLoader(ABC):
+    """Puerto para cargar la configuración arquitectónica (devassistant.toml / pyproject.toml / presets)."""
+
+    @abstractmethod
+    def load(self, project_root: Path, detected_patterns: List[str], stack: str) -> ProjectRules:
         pass
 
 
@@ -32,8 +71,9 @@ class IMemoryRepository(ABC):
     """Puerto para persistencia de memoria episódica y semántica del agente."""
 
     @abstractmethod
-    def save_memory(self, memory: MemoryEntry) -> MemoryEntry:
-        """Guarda o actualiza un hecho o preferencia en la memoria persistente."""
+    def save_memory(
+        self, memory: MemoryEntry, supersedes: Optional[int] = None
+    ) -> MemoryEntry:
         pass
 
     @abstractmethod
@@ -42,18 +82,42 @@ class IMemoryRepository(ABC):
         query: str,
         category: Optional[MemoryCategory] = None,
         project_name: Optional[str] = None,
+        scope: MemoryScope = MemoryScope.ALL,
+        include_history: bool = False,
+        limit: int = 50,
     ) -> List[MemoryEntry]:
-        """Busca recuerdos semánticamente o por coincidencia de texto y tags."""
         pass
 
     @abstractmethod
     def list_memories(
-        self, project_name: Optional[str] = None, limit: int = 50
+        self,
+        project_name: Optional[str] = None,
+        scope: MemoryScope = MemoryScope.ALL,
+        include_history: bool = False,
+        limit: int = 50,
     ) -> List[MemoryEntry]:
-        """Lista los recuerdos más recientes filtrando opcionalmente por proyecto."""
+        pass
+
+    @abstractmethod
+    def list_stale_memories(self, days: int = 180) -> List[MemoryEntry]:
         pass
 
     @abstractmethod
     def delete_memory(self, memory_id: int) -> bool:
-        """Elimina un recuerdo por su identificador."""
+        pass
+
+
+class IAdrRepository(ABC):
+    """Puerto para gestión de Architecture Decision Records (MADR) en el sistema de archivos."""
+
+    @abstractmethod
+    def list_adrs(self, project_root: Path) -> List[AdrEntry]:
+        pass
+
+    @abstractmethod
+    def get_adr(self, project_root: Path, number: int) -> Optional[AdrEntry]:
+        pass
+
+    @abstractmethod
+    def save_adr(self, project_root: Path, adr: AdrEntry) -> AdrEntry:
         pass

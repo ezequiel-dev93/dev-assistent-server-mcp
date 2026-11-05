@@ -1,0 +1,29 @@
+# Dogfooding configuration: DevAssistant MCP Server audits its own Hexagonal Architecture
+version = 1
+preset = "hexagonal-python"
+
+[layers]
+domain         = ["src/core/**"]
+application    = ["src/tools/**"]
+infrastructure = ["src/infrastructure/**"]
+entrypoint     = ["src/server.py", "src/cli.py", "src/settings.py", "src/__main__.py"]
+
+[[rules]]
+id = "domain-no-infra"
+from = "domain"
+disallow_layers = ["infrastructure", "application", "entrypoint"]
+severity = "error"
+description = "Domain layer (src/core) must remain 100% pure and independent of adapters, tools, and entrypoints."
+
+[[rules]]
+id = "domain-no-frameworks"
+from = "domain"
+allow_external = ["pydantic"]
+disallow_external = ["mcp", "sqlite3", "fastapi", "sqlalchemy", "httpx", "requests", "pydantic_settings"]
+severity = "error"
+description = "Domain layer (src/core) may only depend on Python stdlib and Pydantic v2."
+
+[[rules]]
+id = "no-cycles"
+kind = "cycles"
+severity = "error"

@@ -1,18 +1,39 @@
 import json
 import os
 import re
+from pathlib import Path
 from typing import List, Optional, Set, Tuple
-from src.core.models import (
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib  # type: ignore
+
+from ...core.errors import UnparseableFileError
+from ...core.models import (
     ArchitectureAuditReport,
     ArchitecturePattern,
     ArchitectureViolation,
     ProjectDetail,
     ProjectStack,
     ProjectSummary,
+    Severity,
 )
-from src.core.ports import IProjectScanner
+from ...core.ports import (
+    IImportExtractor,
+    IModuleResolver,
+    IProjectConfigLoader,
+    IProjectScanner,
+)
+from ...core.services.rules_engine import (
+    ResolvedImportEdge,
+    evaluate_project_rules,
+)
+from ..config.toml_loader import TomlProjectConfigLoader
+from ..extractors.python_ast import PythonAstExtractor
+from ..extractors.typescript_regex import TypescriptRegexExtractor
+from ..resolvers.module_resolver import ProjectModuleResolver
 
-IGNORED_DIRS = {
+SCAN_IGNORED_DIRS = {
     ".git",
     ".idea",
     ".vscode",
@@ -25,40 +46,58 @@ IGNORED_DIRS = {
     ".astro",
     ".next",
     ".turbo",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
     "data",
 }
 
-FORBIDDEN_IN_DOMAIN_OR_CORE = {
-    "infrastructure",
-    "adapters",
-    "fastapi",
-    "streamlit",
-    "flask",
-    "django",
-    "sqlalchemy",
-    "sqlite3",
-    "psycopg2",
-    "asyncpg",
-    "boto3",
-    "requests",
-    "httpx",
-    "redis",
-    "celery",
-}
+AUDIT_IGNORED_DIRS = SCAN_IGNORED_DIRS - {"data"}
 
-FORBIDDEN_IN_UI_COMPONENTS = {
-    "sqlite3",
-    "sqlalchemy",
-    "psycopg2",
-    "pg",
-    "prisma",
-    "@prisma/client",
-    "mongoose",
+_HTML_COMMENT_RE = re.compile(r"<!--[\s\S]*?-->")
+_REQ_NAME_RE = re.compile(r"^([A-Za-z0-9_\-\.]+)")
+
+PYTHON_TECH_MAP = {
+    "fastapi": "fastapi",
+    "streamlit": "streamlit",
+    "django": "django",
+    "sqlalchemy": "sqlalchemy",
+    "alembic": "alembic",
+    "redis": "redis",
+    "pydantic": "pydantic",
+    "arq": "arq",
+    "celery": "celery",
+    "stripe": "stripe",
+    "mercadopago": "mercadopago",
+    "pgvector": "pgvector",
+    "boto3": "boto3",
+    "slowapi": "slowapi",
+    "python-jose": "jose",
+    "jose": "jose",
+    "pyjwt": "pyjwt",
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "google-genai": "google-genai",
+    "google-generativeai": "google-generativeai",
+    "mcp": "mcp",
 }
 
 
 class FileSystemProjectScanner(IProjectScanner):
-    """Adaptador de infraestructura que analiza proyectos reales en el sistema de archivos."""
+    """Filesystem adapter for scanning, inspecting, and auditing software projects."""
+
+    def __init__(
+        self,
+        extractors: Optional[List[IImportExtractor]] = None,
+        resolver: Optional[IModuleResolver] = None,
+        config_loader: Optional[IProjectConfigLoader] = None,
+    ) -> None:
+        self.extractors: List[IImportExtractor] = extractors or [
+            PythonAstExtractor(),
+            TypescriptRegexExtractor(),
+        ]
+        self.resolver: IModuleResolver = resolver or ProjectModuleResolver()
+        self.config_loader: IProjectConfigLoader = config_loader or TomlProjectConfigLoader()
 
     def scan_workspace(self, root_dir: str) -> List[ProjectSummary]:
         results: List[ProjectSummary] = []
@@ -67,13 +106,11 @@ class FileSystemProjectScanner(IProjectScanner):
         if not os.path.isdir(abs_root):
             return results
 
-        # Escanear subdirectorios inmediatos
-        for item in os.listdir(abs_root):
+        for item in sorted(os.listdir(abs_root)):
             item_path = os.path.join(abs_root, item)
-            if not os.path.isdir(item_path) or item in IGNORED_DIRS:
+            if not os.path.isdir(item_path) or item in SCAN_IGNORED_DIRS or item.startswith("."):
                 continue
 
-            # Verificar si este subdirectorio es un proyecto
             if self._is_project_dir(item_path):
                 detail = self.inspect_project(item_path)
                 results.append(
@@ -115,122 +152,92 @@ class FileSystemProjectScanner(IProjectScanner):
         )
 
     def audit_architecture(self, project_path: str) -> ArchitectureAuditReport:
-        abs_path = os.path.abspath(project_path)
-        name = os.path.basename(abs_path)
-        architectures, _ = self._detect_architecture(abs_path)
+        abs_path = Path(project_path).resolve()
+        name = abs_path.name
+        stack, _ = self._detect_stack_and_tech(str(abs_path))
+        architectures, _ = self._detect_architecture(str(abs_path))
 
-        violations: List[ArchitectureViolation] = []
+        pattern_names = [a.value for a in architectures]
+        rules = self.config_loader.load(abs_path, pattern_names, stack.value)
+
+        edges: List[ResolvedImportEdge] = []
+        parse_findings: List[ArchitectureViolation] = []
         files_scanned = 0
-        code_extensions = {".py", ".ts", ".tsx", ".js", ".jsx", ".astro"}
 
         for root, dirs, files in os.walk(abs_path):
-            dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
-            rel_root = os.path.relpath(root, abs_path).replace("\\", "/")
-            path_parts = [p.lower() for p in rel_root.split("/") if p and p != "."]
+            dirs[:] = [
+                d for d in dirs if d not in AUDIT_IGNORED_DIRS and not d.startswith(".")
+            ]
+            for fname in sorted(files):
+                fpath = Path(root) / fname
+                extractor = self._find_extractor(fpath)
+                if not extractor:
+                    continue
 
-            in_core_or_domain = any(p in ("core", "domain", "ports", "entities") for p in path_parts)
-            in_ui_components = "components" in path_parts
-
-            for fname in files:
-                _, ext = os.path.splitext(fname)
-                if ext.lower() not in code_extensions:
+                try:
+                    if fpath.stat().st_size > 2_000_000:
+                        continue
+                except OSError:
                     continue
 
                 files_scanned += 1
-                if not (in_core_or_domain or in_ui_components):
-                    continue
-
-                full_file_path = os.path.join(root, fname)
-                rel_file_path = os.path.relpath(full_file_path, abs_path).replace("\\", "/")
+                rel_source = fpath.relative_to(abs_path).as_posix()
 
                 try:
-                    with open(full_file_path, "r", encoding="utf-8", errors="ignore") as f:
-                        for line_idx, raw_line in enumerate(f, start=1):
-                            line = raw_line.strip()
-                            if not line or line.startswith("#") or line.startswith("//"):
-                                continue
+                    import_refs = extractor.extract(fpath, abs_path)
+                except UnparseableFileError as exc:
+                    parse_findings.append(
+                        ArchitectureViolation(
+                            rule_id="unparseable-file",
+                            file_path=rel_source,
+                            line_number=1,
+                            offending_statement="<syntax or encoding error>",
+                            rule_broken=f"File could not be parsed: {exc.cause}",
+                            severity=Severity.INFO,
+                        )
+                    )
+                    continue
 
-                            imported_targets = self._extract_imported_modules(line)
-                            if not imported_targets:
-                                continue
+                for ref in import_refs:
+                    internal_target = self.resolver.resolve_internal(
+                        ref.module, fpath, abs_path
+                    )
+                    if internal_target is not None:
+                        edges.append(
+                            ResolvedImportEdge(
+                                source_file=rel_source,
+                                import_ref=ref,
+                                target_file=internal_target.as_posix(),
+                                external_package=None,
+                            )
+                        )
+                    elif not self.resolver.is_stdlib(ref.module, fpath):
+                        edges.append(
+                            ResolvedImportEdge(
+                                source_file=rel_source,
+                                import_ref=ref,
+                                target_file=None,
+                                external_package=ref.module,
+                            )
+                        )
 
-                            if in_core_or_domain:
-                                for target in imported_targets:
-                                    root_pkg = target.split(".")[0].split("/")[0].lower()
-                                    if (
-                                        root_pkg in FORBIDDEN_IN_DOMAIN_OR_CORE
-                                        or "infrastructure" in target.lower()
-                                        or "adapters" in target.lower()
-                                    ):
-                                        violations.append(
-                                            ArchitectureViolation(
-                                                file_path=rel_file_path,
-                                                line_number=line_idx,
-                                                offending_statement=line,
-                                                rule_broken=(
-                                                    f"Hexagonal Architecture Violation: Core/Domain layer cannot depend on "
-                                                    f"external framework or infrastructure module '{target}'. Inject via Ports instead."
-                                                ),
-                                                severity="ERROR",
-                                            )
-                                        )
-                                        break
-
-                            if in_ui_components:
-                                for target in imported_targets:
-                                    target_low = target.lower()
-                                    if any(
-                                        forbidden in target_low
-                                        for forbidden in FORBIDDEN_IN_UI_COMPONENTS
-                                    ):
-                                        violations.append(
-                                            ArchitectureViolation(
-                                                file_path=rel_file_path,
-                                                line_number=line_idx,
-                                                offending_statement=line,
-                                                rule_broken=(
-                                                    f"Screaming/Clean UI Violation: UI Component directly imports persistence/DB "
-                                                    f"client '{target}'. Delegate data access to a Service or Use Case."
-                                                ),
-                                                severity="ERROR",
-                                            )
-                                        )
-                                        break
-                except Exception:
-                    pass
+        rule_violations = evaluate_project_rules(edges=edges, rules=rules)
+        all_violations = rule_violations + parse_findings
 
         return ArchitectureAuditReport(
             project_name=name,
-            project_path=abs_path,
+            project_path=str(abs_path),
+            preset_used=rules.preset,
             detected_architectures=architectures,
             files_scanned=files_scanned,
-            is_compliant=len(violations) == 0,
-            violations=violations,
+            violations=all_violations,
         )
 
-    def _extract_imported_modules(self, line: str) -> List[str]:
-        targets: List[str] = []
-        # Python: from X import Y  |  import X
-        py_from = re.match(r"^from\s+([a-zA-Z0-9_\.]+)\s+import\s+", line)
-        if py_from:
-            targets.append(py_from.group(1))
-            return targets
-
-        py_import = re.match(r"^import\s+([a-zA-Z0-9_\.,\s]+)", line)
-        if py_import:
-            raw_mods = py_import.group(1).split(",")
-            for m in raw_mods:
-                clean_m = m.strip().split(" ")[0]
-                if clean_m:
-                    targets.append(clean_m)
-            return targets
-
-        # TypeScript / JS: import ... from 'X' or "X"
-        ts_from = re.search(r"(?:import|from)\s+['\"]([^'\"]+)['\"]", line)
-        if ts_from:
-            targets.append(ts_from.group(1))
-
-        return targets
+    def _find_extractor(self, file_path: Path) -> Optional[IImportExtractor]:
+        for ext in self.extractors:
+            if ext.supports(file_path):
+                return ext
+        return None
 
     def _is_project_dir(self, dir_path: str) -> bool:
         project_indicators = [
@@ -249,9 +256,9 @@ class FileSystemProjectScanner(IProjectScanner):
 
     def _detect_stack_and_tech(self, dir_path: str) -> Tuple[ProjectStack, List[str]]:
         technologies: Set[str] = set()
-        stack = ProjectStack.UNKNOWN
+        node_stack: ProjectStack = ProjectStack.UNKNOWN
+        py_stack: ProjectStack = ProjectStack.UNKNOWN
 
-        # 1. Analizar package.json si existe
         pkg_json_path = os.path.join(dir_path, "package.json")
         if os.path.exists(pkg_json_path):
             try:
@@ -261,22 +268,23 @@ class FileSystemProjectScanner(IProjectScanner):
                         **data.get("dependencies", {}),
                         **data.get("devDependencies", {}),
                     }
+                    dep_keys = {k.lower() for k in deps.keys()}
 
-                    if "astro" in deps:
-                        stack = ProjectStack.ASTRO
+                    if "astro" in dep_keys:
+                        node_stack = ProjectStack.ASTRO
                         technologies.add("astro")
-                    elif "next" in deps:
-                        stack = ProjectStack.NEXTJS
+                    elif "next" in dep_keys:
+                        node_stack = ProjectStack.NEXTJS
                         technologies.add("nextjs")
-                    elif "react" in deps:
-                        if stack == ProjectStack.UNKNOWN:
-                            stack = ProjectStack.REACT
+                    elif "@nestjs/core" in dep_keys:
+                        node_stack = ProjectStack.NESTJS
+                        technologies.add("nestjs")
+                    elif "react" in dep_keys:
+                        node_stack = ProjectStack.REACT
                         technologies.add("react")
                     else:
-                        if stack == ProjectStack.UNKNOWN:
-                            stack = ProjectStack.NODE_GENERIC
+                        node_stack = ProjectStack.NODE_GENERIC
 
-                    # Detectar tecnologías comunes en Node
                     for tech_key in [
                         "supabase",
                         "@supabase/supabase-js",
@@ -288,56 +296,73 @@ class FileSystemProjectScanner(IProjectScanner):
                         "zod",
                         "@modelcontextprotocol/sdk",
                     ]:
-                        if any(tech_key in dep for dep in deps):
+                        if tech_key in dep_keys:
                             technologies.add(tech_key)
             except Exception:
                 pass
 
-        # 2. Analizar Python (pyproject.toml o requirements.txt)
-        py_files = ["requirements.txt", "pyproject.toml", "Pipfile"]
-        for py_file in py_files:
-            file_path = os.path.join(dir_path, py_file)
-            if os.path.exists(file_path):
+        py_deps: Set[str] = set()
+        pyproject_path = os.path.join(dir_path, "pyproject.toml")
+        if os.path.isfile(pyproject_path):
+            py_stack = ProjectStack.PYTHON_GENERIC
+            try:
+                with open(pyproject_path, "rb") as f:
+                    py_data = tomllib.load(f)
+                raw_deps: List[str] = list(py_data.get("project", {}).get("dependencies", []))
+                opt_deps = py_data.get("project", {}).get("optional-dependencies", {})
+                if isinstance(opt_deps, dict):
+                    for extra_list in opt_deps.values():
+                        if isinstance(extra_list, list):
+                            raw_deps.extend(str(x) for x in extra_list)
+                poetry_deps = py_data.get("tool", {}).get("poetry", {}).get("dependencies", {})
+                if isinstance(poetry_deps, dict):
+                    raw_deps.extend(poetry_deps.keys())
+
+                for spec in raw_deps:
+                    m = _REQ_NAME_RE.match(spec.strip())
+                    if m:
+                        py_deps.add(m.group(1).lower().replace("_", "-"))
+            except Exception:
+                pass
+
+        for req_file in ["requirements.txt", "Pipfile"]:
+            req_path = os.path.join(dir_path, req_file)
+            if os.path.isfile(req_path):
+                if py_stack == ProjectStack.UNKNOWN:
+                    py_stack = ProjectStack.PYTHON_GENERIC
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        content = f.read().lower()
-
-                        if "fastapi" in content:
-                            stack = ProjectStack.FASTAPI
-                            technologies.add("fastapi")
-                        elif "streamlit" in content:
-                            stack = ProjectStack.STREAMLIT
-                            technologies.add("streamlit")
-                        elif stack == ProjectStack.UNKNOWN:
-                            stack = ProjectStack.PYTHON_GENERIC
-
-                        for tech_key in [
-                            "sqlalchemy",
-                            "alembic",
-                            "redis",
-                            "pydantic",
-                            "arq",
-                            "celery",
-                            "stripe",
-                            "mercadopago",
-                            "pgvector",
-                            "boto3",
-                            "cognito",
-                            "slowapi",
-                            "jose",
-                            "pyjwt",
-                            "openai",
-                            "anthropic",
-                            "google-genai",
-                            "google-generativeai",
-                            "mcp",
-                        ]:
-                            if tech_key in content:
-                                technologies.add(tech_key)
+                    with open(req_path, "r", encoding="utf-8") as f:
+                        for raw_line in f:
+                            line = raw_line.split("#")[0].strip()
+                            if not line or line.startswith("-"):
+                                continue
+                            m = _REQ_NAME_RE.match(line)
+                            if m:
+                                py_deps.add(m.group(1).lower().replace("_", "-"))
                 except Exception:
                     pass
 
-        return stack, sorted(list(technologies))
+        for dep_name in py_deps:
+            if dep_name in PYTHON_TECH_MAP:
+                technologies.add(PYTHON_TECH_MAP[dep_name])
+
+        if "fastapi" in py_deps:
+            py_stack = ProjectStack.FASTAPI
+        elif "django" in py_deps:
+            py_stack = ProjectStack.DJANGO
+        elif "streamlit" in py_deps:
+            py_stack = ProjectStack.STREAMLIT
+
+        if node_stack not in (ProjectStack.UNKNOWN, ProjectStack.NODE_GENERIC):
+            primary_stack = node_stack
+        elif py_stack not in (ProjectStack.UNKNOWN, ProjectStack.PYTHON_GENERIC):
+            primary_stack = py_stack
+        elif node_stack != ProjectStack.UNKNOWN:
+            primary_stack = node_stack
+        else:
+            primary_stack = py_stack
+
+        return primary_stack, sorted(list(technologies))
 
     def _detect_architecture(
         self, dir_path: str
@@ -346,33 +371,27 @@ class FileSystemProjectScanner(IProjectScanner):
         found_dirs: Set[str] = set()
 
         for root, dirs, _ in os.walk(dir_path):
+            dirs[:] = [
+                d for d in dirs if d not in SCAN_IGNORED_DIRS and not d.startswith(".")
+            ]
             rel_root = os.path.relpath(root, dir_path).replace("\\", "/")
-            if any(part in IGNORED_DIRS for part in rel_root.split("/")):
-                continue
 
             for d in dirs:
-                if d in IGNORED_DIRS:
-                    continue
-                full_rel = os.path.normpath(os.path.join(rel_root, d)).replace("\\", "/")
-                if full_rel.startswith("."):
-                    continue
+                full_rel = d if rel_root == "." else f"{rel_root}/{d}"
                 found_dirs.add(full_rel)
 
         dir_names = {os.path.basename(d).lower() for d in found_dirs}
 
-        # Detección de Hexagonal (Ports & Adapters)
         has_ports_adapters = ("ports" in dir_names and "adapters" in dir_names) or (
             "core" in dir_names and "infrastructure" in dir_names
         )
         if has_ports_adapters:
             patterns.append(ArchitecturePattern.HEXAGONAL)
 
-        # Detección de Screaming Architecture (Feature-driven / Modules)
         has_screaming = "modules" in dir_names or "features" in dir_names
         if has_screaming:
             patterns.append(ArchitecturePattern.SCREAMING)
 
-        # Detección de Clean / Layered tradicional
         if "domain" in dir_names and "application" in dir_names:
             if ArchitecturePattern.HEXAGONAL not in patterns:
                 patterns.append(ArchitecturePattern.CLEAN_LAYERED)
@@ -418,9 +437,12 @@ class FileSystemProjectScanner(IProjectScanner):
             readme_path = os.path.join(dir_path, candidate)
             if os.path.isfile(readme_path):
                 try:
-                    with open(readme_path, "r", encoding="utf-8") as f:
-                        lines = [line.strip() for line in f.readlines()[:12] if line.strip()]
-                        return "\n".join(lines[:6])
+                    with open(readme_path, "r", encoding="utf-8", errors="replace") as f:
+                        raw_text = f.read(4096)
+                    cleaned = _HTML_COMMENT_RE.sub("", raw_text)
+                    lines = [line.strip() for line in cleaned.splitlines()[:12] if line.strip()]
+                    summary = "\n".join(lines[:6])
+                    return summary[:600] if summary else None
                 except Exception:
                     pass
         return None

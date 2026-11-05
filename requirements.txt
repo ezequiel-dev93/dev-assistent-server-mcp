@@ -1,4 +1,5 @@
-# Dependencias oficiales del Model Context Protocol (MCP)
-mcp>=1.2.0
-pydantic>=2.8.0
-typing-extensions>=4.12.0
+# DevAssistant MCP Server v2.0 — Runtime Dependencies
+mcp>=1.10.0
+pydantic>=2.6.0
+tomli>=2.0.1; python_version < '3.11'
+
