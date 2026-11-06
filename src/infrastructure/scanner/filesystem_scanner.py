@@ -79,6 +79,7 @@ PYTHON_TECH_MAP = {
     "anthropic": "anthropic",
     "google-genai": "google-genai",
     "google-generativeai": "google-generativeai",
+    "httpx": "httpx",
     "mcp": "mcp",
 }
 

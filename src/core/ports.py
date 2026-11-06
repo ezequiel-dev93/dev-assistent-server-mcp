@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 from .models import (
     AdrEntry,
     ArchitectureAuditReport,
+    DockerStackReport,
+    EndpointRequestSpec,
+    HttpProbeRawResponse,
     ImportRef,
     MemoryCategory,
     MemoryEntry,
@@ -11,6 +14,7 @@ from .models import (
     ProjectDetail,
     ProjectRules,
     ProjectSummary,
+    TestRunReport,
 )
 
 
@@ -121,3 +125,37 @@ class IAdrRepository(ABC):
     @abstractmethod
     def save_adr(self, project_root: Path, adr: AdrEntry) -> AdrEntry:
         pass
+
+
+class IHttpProbe(ABC):
+    """Puerto de salida para ejecutar peticiones HTTP de QA desacopladas del cliente de transporte."""
+
+    @abstractmethod
+    def send(
+        self,
+        spec: EndpointRequestSpec,
+        resolved_headers: Dict[str, str],
+    ) -> HttpProbeRawResponse:
+        pass
+
+
+class IRuntimeQaRunner(ABC):
+    """Puerto de salida para diagnóstico dinámico de contenedores Docker y ejecución aislada de tests."""
+
+    @abstractmethod
+    def inspect_docker_compose(
+        self, project_dir: Path, tail_logs: int = 30
+    ) -> DockerStackReport:
+        pass
+
+    @abstractmethod
+    def run_test_suite(
+        self,
+        project_dir: Path,
+        target_subpath: Optional[str] = None,
+        keyword: Optional[str] = None,
+        timeout_seconds: float = 60.0,
+    ) -> TestRunReport:
+        pass
+
+

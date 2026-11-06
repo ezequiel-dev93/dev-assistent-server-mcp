@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dev-assistant-mcp"
-version = "2.0.0"
-description = "Hexagonal Architecture Guardian, AST Linter, MADR Drift Detector & Sovereign FTS5 SQLite Memory MCP Server for AI Coding Agents."
+version = "2.1.0"
+description = "Hexagonal Architecture Guardian, AST Linter, MADR Drift Detector, Sovereign FTS5 SQLite Memory & Freelance Automated QA MCP Server for AI Coding Agents."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -26,6 +26,7 @@ keywords = [
 dependencies = [
     "mcp>=1.10.0",
     "pydantic>=2.6.0",
+    "httpx>=0.27.0",
     "tomli>=2.0.1; python_version < '3.11'",
 ]
 
@@ -55,8 +56,10 @@ packages = [
     "dev_assistant_mcp.infrastructure.adr",
     "dev_assistant_mcp.infrastructure.config",
     "dev_assistant_mcp.infrastructure.extractors",
+    "dev_assistant_mcp.infrastructure.http",
     "dev_assistant_mcp.infrastructure.reporting",
     "dev_assistant_mcp.infrastructure.resolvers",
+    "dev_assistant_mcp.infrastructure.runtime",
     "dev_assistant_mcp.infrastructure.scanner",
     "dev_assistant_mcp.infrastructure.storage",
     "dev_assistant_mcp.tools",

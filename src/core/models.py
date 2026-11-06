@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -237,3 +237,212 @@ class AuthorProfile(BaseModel):
     @property
     def is_configured(self) -> bool:
         return any([self.name, self.portfolio_url, self.github_url, self.linkedin_url, self.email])
+
+
+class HttpMethod(str, Enum):
+    GET = "GET"
+    POST = "POST"
+    PUT = "PUT"
+    PATCH = "PATCH"
+    DELETE = "DELETE"
+    HEAD = "HEAD"
+    OPTIONS = "OPTIONS"
+
+
+class EndpointRequestSpec(BaseModel):
+    name: str = Field(default="", description="Nombre opcional del caso de prueba")
+    url: str = Field(description="URL HTTP/HTTPS completa del endpoint")
+    method: HttpMethod = Field(default=HttpMethod.GET, description="Método HTTP")
+    headers: Dict[str, str] = Field(default_factory=dict, description="Headers HTTP adicionales")
+    query_params: Dict[str, str] = Field(
+        default_factory=dict, description="Parámetros de query string"
+    )
+    json_payload: Optional[Any] = Field(
+        default=None, description="Cuerpo JSON opcional para POST/PUT/PATCH/DELETE"
+    )
+    auth_env_var: Optional[str] = Field(
+        default=None,
+        description="Nombre de variable de entorno local cuyo token se inyecta sin exponerlo al LLM",
+    )
+    auth_scheme: str = Field(
+        default="Bearer",
+        description="Prefijo de autorización (ej. Bearer, Basic, Token, o vacío para enviar valor crudo)",
+    )
+    auth_header: str = Field(
+        default="Authorization",
+        description="Nombre del header donde inyectar la credencial (ej. Authorization o X-API-Key)",
+    )
+    expected_status: int = Field(default=200, description="Código HTTP esperado")
+    max_response_time_ms: Optional[float] = Field(
+        default=None, description="Tiempo máximo de respuesta aceptable en ms"
+    )
+    expected_json_keys: List[str] = Field(
+        default_factory=list,
+        description="Claves o rutas dot-notation esperadas en el cuerpo JSON (ej. data.id)",
+    )
+    expected_body_contains: Optional[str] = Field(
+        default=None, description="Texto que debe estar contenido en el cuerpo de respuesta"
+    )
+    timeout_seconds: float = Field(
+        default=10.0, ge=0.5, le=60.0, description="Timeout máximo en segundos"
+    )
+    allow_private_network: bool = Field(
+        default=True,
+        description="Permite localhost/LAN para desarrollo local, bloqueando siempre cloud metadata SSRF",
+    )
+
+
+class HttpProbeRawResponse(BaseModel):
+    status_code: Optional[int] = None
+    response_time_ms: float = 0.0
+    headers: Dict[str, str] = Field(default_factory=dict)
+    content_type: str = ""
+    body_text: str = ""
+    size_bytes: int = 0
+    transport_used: str = "httpx"
+    error: Optional[str] = None
+
+
+class AssertionCheckResult(BaseModel):
+    check: str = Field(description="Tipo de validación ejecutada")
+    passed: bool
+    expected: str
+    actual: str
+    message: str
+
+
+class EndpointTestResult(BaseModel):
+    name: str = ""
+    url: str
+    method: HttpMethod
+    passed: bool
+    status_code: Optional[int] = None
+    expected_status: int = 200
+    response_time_ms: float = 0.0
+    content_type: str = ""
+    size_bytes: int = 0
+    json_top_keys: List[str] = Field(default_factory=list)
+    checks: List[AssertionCheckResult] = Field(default_factory=list)
+    data_preview: str = ""
+    redacted_labels: List[str] = Field(default_factory=list)
+    auth_injected_from_env: Optional[str] = None
+    error: Optional[str] = None
+
+
+class ApiSuiteReport(BaseModel):
+    suite_name: str = Field(default="API QA Suite")
+    base_url: Optional[str] = None
+    results: List[EndpointTestResult] = Field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return len(self.results)
+
+    @property
+    def passed_count(self) -> int:
+        return sum(1 for r in self.results if r.passed)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(1 for r in self.results if not r.passed)
+
+    @property
+    def all_passed(self) -> bool:
+        return len(self.results) > 0 and all(r.passed for r in self.results)
+
+    @property
+    def total_time_ms(self) -> float:
+        return round(sum(r.response_time_ms for r in self.results), 2)
+
+
+class EnvDockerFinding(BaseModel):
+    rule_id: str = Field(description="Identificador de la regla de entorno o Docker")
+    severity: Severity = Field(default=Severity.WARNING)
+    file_path: str = Field(description="Archivo relativo donde se detectó el hallazgo")
+    key_or_target: str = Field(description="Variable de entorno, servicio o instrucción afectada")
+    message: str = Field(description="Descripción del problema (sin exponer valores secretos)")
+    remediation: str = Field(default="", description="Acción recomendada para corregirlo")
+
+
+class EnvDockerAuditReport(BaseModel):
+    project_name: str
+    project_path: str
+    env_files_found: List[str] = Field(default_factory=list)
+    docker_files_found: List[str] = Field(default_factory=list)
+    documented_env_keys: List[str] = Field(default_factory=list)
+    configured_env_keys: List[str] = Field(default_factory=list)
+    compose_referenced_keys: List[str] = Field(default_factory=list)
+    missing_in_env: List[str] = Field(default_factory=list)
+    empty_in_env: List[str] = Field(default_factory=list)
+    placeholder_in_env: List[str] = Field(default_factory=list)
+    undocumented_in_example: List[str] = Field(default_factory=list)
+    findings: List[EnvDockerFinding] = Field(default_factory=list)
+
+    @property
+    def is_compliant(self) -> bool:
+        return not any(f.severity == Severity.ERROR for f in self.findings)
+
+    @property
+    def error_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == Severity.ERROR)
+
+    @property
+    def warning_count(self) -> int:
+        return sum(1 for f in self.findings if f.severity == Severity.WARNING)
+
+
+class DockerServiceStatus(BaseModel):
+    name: str = Field(description="Nombre del contenedor")
+    service: str = Field(description="Nombre del servicio en docker-compose")
+    state: str = Field(description="Estado del contenedor (running, exited, restarting, etc.)")
+    health: str = Field(default="", description="Estado de healthcheck (healthy, unhealthy, starting)")
+    status_detail: str = Field(default="", description="Detalle de uptime o código de salida")
+    ports: List[str] = Field(default_factory=list, description="Mapeos de puertos publicados")
+    is_healthy: bool = Field(default=True, description="True si está running y sin fallo de healthcheck")
+    recent_logs: str = Field(default="", description="Últimas líneas de logs sanitizadas si falló")
+    redacted_labels: List[str] = Field(default_factory=list)
+
+
+class DockerStackReport(BaseModel):
+    project_name: str
+    project_path: str
+    compose_file: Optional[str] = None
+    daemon_available: bool = True
+    services: List[DockerServiceStatus] = Field(default_factory=list)
+    error: Optional[str] = None
+
+    @property
+    def all_healthy(self) -> bool:
+        return (
+            self.daemon_available
+            and self.error is None
+            and len(self.services) > 0
+            and all(s.is_healthy for s in self.services)
+        )
+
+    @property
+    def running_count(self) -> int:
+        return sum(1 for s in self.services if s.state.lower() == "running")
+
+    @property
+    def unhealthy_services(self) -> List[str]:
+        return [s.service for s in self.services if not s.is_healthy]
+
+
+class TestRunReport(BaseModel):
+    project_name: str
+    project_path: str
+    runner_used: str = Field(description="pytest o unittest")
+    command_summary: str = Field(description="Comando ejecutado (sin rutas sensibles)")
+    passed: bool
+    exit_code: int
+    duration_ms: float = 0.0
+    passed_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+    error_count: int = 0
+    output_excerpt: str = ""
+    redacted_labels: List[str] = Field(default_factory=list)
+
+
+

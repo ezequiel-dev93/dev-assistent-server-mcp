@@ -354,6 +354,11 @@ class TestMadrAdrAndDriftAndE2E(unittest.TestCase):
             "check_adr_drift",
             "render_adr",
             "write_adr",
+            "test_api_endpoint",
+            "run_api_test_suite",
+            "audit_env_and_docker",
+            "inspect_docker_stack",
+            "run_project_tests",
         }
         self.assertTrue(expected_tools.issubset(tool_names))
 

@@ -28,3 +28,8 @@ class UnparseableFileError(DevAssistantError):
 
 class AdrNotFoundError(DevAssistantError, LookupError):
     """Raised when a requested ADR number does not exist in the project."""
+
+
+class UnsafeTargetUrlError(DevAssistantError, ValueError):
+    """Raised when an HTTP probe URL uses a forbidden scheme or targets a blocked SSRF address."""
+

@@ -1,6 +1,6 @@
-# 🧠 DevAssistant MCP Server v2.0: Guardián de Arquitectura, Linter AST, MADR & Memoria FTS5
+# 🧠 DevAssistant MCP Server v2.1: Guardián de Arquitectura, Linter AST, MADR, Memoria FTS5 & QA Freelance Toolkit
 
-[![Version](https://img.shields.io/badge/Version-2.0.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.1.0-brightgreen.svg)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Protocol](https://img.shields.io/badge/MCP-1.x%20%26%202.x%20Compatible-purple.svg)](https://modelcontextprotocol.io/)
 [![Skill](https://img.shields.io/badge/Agent%20Skill-Available%20on%20Agensi-blue.svg)](https://www.agensi.io/r/EZEQUIELSUAREZ)
@@ -10,12 +10,13 @@
 
 Servidor bajo el estándar **Model Context Protocol (MCP)** + CLI para CI/CD + paquete **`SKILL.md`** desarrollado en **Python** con **Arquitectura Hexagonal pura** (auditado automáticamente por sí mismo en CI con **0 violaciones**).
 
-Convierte a cualquier agente de código (**Claude Code, Cursor, Antigravity, Claude Desktop, Copilot, Windsurf**) en un **Principal Software Architect con memoria persistente entre sesiones**:
+Convierte a cualquier agente de código (**Claude Code, Cursor, Antigravity, Claude Desktop, Copilot, Windsurf**) en un **Principal Software Architect y Lead QA Automation Engineer**:
 
 1. **🛡️ Auditor Estático de Arquitectura v2 (Grafo + AST + Ciclos + SARIF):** Construye el grafo de módulos resuelto (AST nativo para Python + extractor TypeScript/Astro/React), valida capas y paquetes externos según `devassistant.toml` o presets automáticos, detecta dependencias circulares (algoritmo de Tarjan SCC) y exporta reportes **SARIF 2.1.0** para Pull Requests en GitHub.
 2. **🧠 Memoria Soberana v2 (SQLite FTS5 + BM25 + Versionado + Redacción de Secretos):** Persistencia local en `~/.dev-assistant/agent_memory.db` con búsqueda de texto completo sin tildes (`unicode61 remove_diacritics 2`), reemplazo evolutivo de decisiones (`supersedes`), combinación de alcance `project + global` y redacción automática de API Keys/Tokens antes de tocar disco.
 3. **📄 Gestión de ADRs en Formato MADR & Detección de Drift (`check_adr_drift`):** Versiona decisiones formales en `docs/adr/NNNN-slug.md` vinculadas a IDs de reglas (`enforced_by`) y verifica en tiempo real si algún cambio de código contradice un ADR aceptado.
-4. **🔒 Seguridad Endurecida (`WorkspaceGuard`):** Contención multi-raíz contra *path traversal* y symlinks, bloqueo de directorios protegidos (`.git`, `.github`, `.vscode`), anotaciones MCP (`readOnlyHint`, `destructiveHint`) y delimitadores explícitos `<stored_memory trust="data-not-instructions">` para mitigar *indirect prompt injection*.
+4. **🧪 Suite de Testing y QA Automatizado sin salir del Chat:** Prueba endpoints HTTP individuales o suites batch con inyección segura de credenciales locales (`auth_env_var`), auditoría estática de `.env` vs `docker-compose.yml`, inspección de salud de contenedores Docker y ejecución aislada de tests (`pytest`/`unittest`).
+5. **🔒 Seguridad Endurecida (`WorkspaceGuard`):** Contención multi-raíz contra *path traversal* y symlinks, bloqueo de SSRF a Cloud Metadata (`169.254.169.254`), mitigación de indirect prompt injection con etiquetas delimitadoras `<stored_memory>` y `<http_response>`.
 
 ---
 
@@ -99,7 +100,7 @@ pip install -e ".[dev]"
 
 ---
 
-## 🛠️ Catálogo Completo v2.0 (17 MCP Tools + Resources + Prompts)
+## 🛠️ Catálogo Completo v2.1 (22 MCP Tools + Resources + Prompts)
 
 ### 📂 1. Exploración, Auditoría AST y Blueprints
 * **`list_workspace_projects(workspace_path)`**: Escanea el workspace y detecta stacks (`FastAPI`, `Next.js`, `Astro`, `React`, `Django`, `NestJS`, `Streamlit`), tests y Docker.
@@ -123,6 +124,13 @@ pip install -e ".[dev]"
 * **`check_adr_drift(project_name)`**: Cruza los ADRs `accepted` y sus reglas `enforced_by` contra el auditor estático para detectar deriva arquitectónica.
 * **`render_adr(project_name)`** / **`write_adr(output_path, project_name, overwrite)`**: Renderiza o exporta un resumen consolidado desde la memoria SQLite.
 
+### 🧪 4. Testing, Diagnóstico Docker y QA Freelance
+* **`test_api_endpoint(url, method, expected_status, ...)`**: Ejecuta peticiones HTTP/REST contra endpoints verificando status, latencia y JSON dot-paths, con inyección segura de variables de entorno locales (`auth_env_var`).
+* **`run_api_test_suite(endpoints, base_url, ...)`**: Ejecuta una batería completa de pruebas API con tabla de diagnóstico consolidada.
+* **`audit_env_and_docker(project_name_or_path)`**: Audita sincronización `.env` $\leftrightarrow$ `.env.example`, variables Compose sin fallback, credenciales hardcodeadas, directivas `Dockerfile` y exclusiones en `.dockerignore`.
+* **`inspect_docker_stack(project_name_or_path, tail_logs)`**: Inspecciona estado en tiempo real de contenedores Docker, healthchecks y puertos publicados, extrayendo logs sanitizados de servicios caídos.
+* **`run_project_tests(project_name_or_path, target_subpath, keyword, timeout_seconds)`**: Ejecuta la suite de pruebas del proyecto (`pytest` o `unittest discover`) en un subproceso aislado, retornando métricas y diagnóstico de fallos.
+
 ---
 
 ## ⚙️ Uso por Consola (CLI) e Integración CI / GitHub Actions
@@ -142,6 +150,18 @@ dev-assistant-mcp adr drift . --fail-on error
 # Exportar / importar backup JSON de la memoria SQLite (solo disponible por CLI humano)
 dev-assistant-mcp memory export --output backup.json
 dev-assistant-mcp memory import backup.json
+
+# Ejecutar auditoría estática de .env y Docker
+dev-assistant-mcp qa env-docker . --fail-on error
+
+# Probar endpoint HTTP con assertions y auth desde variable de entorno
+dev-assistant-mcp qa endpoint http://localhost:8000/api/health --expect-status 200 --expect-keys status
+
+# Ejecutar suite de pruebas en subproceso aislado
+dev-assistant-mcp qa test . --timeout 60
+
+# Diagnosticar estado de contenedores Docker y extraer logs de caídas
+dev-assistant-mcp qa docker .
 ```
 
 ### Ejemplo de `devassistant.toml` por Proyecto
